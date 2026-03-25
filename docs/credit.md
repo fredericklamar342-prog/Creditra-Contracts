@@ -102,6 +102,49 @@ Configure rate-change limits (admin only).
 
 ### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
 Returns the current rate-change configuration (or `None` if not set).
+### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
+Update the risk parameters for an existing credit line. Admin-only.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `borrower` | `Address` | Borrower whose credit line to update |
+| `credit_limit` | `i128` | New credit limit (must be ≥ current `utilized_amount`) |
+| `interest_rate_bps` | `u32` | New interest rate in basis points (0–10000) |
+| `risk_score` | `u32` | New risk score (0–100) |
+
+#### Rate-change limits (optional, backward-compatible)
+When a `RateChangeConfig` has been set via `set_rate_change_limits`, the following
+checks are enforced **only when the interest rate is actually changing**:
+
+- The absolute delta `|new_rate - old_rate|` must be ≤ `max_rate_change_bps`.
+- If `last_rate_update_ts > 0` and `rate_change_min_interval > 0`, the elapsed
+  time since the last rate change must be ≥ `rate_change_min_interval`.
+- If the rate is **unchanged**, both checks are skipped entirely.
+- If **no config is set**, no limits are enforced (fully backward-compatible).
+
+On a successful rate change, `last_rate_update_ts` is updated to the current
+ledger timestamp.
+
+#### Errors
+| Condition | Panic message |
+|---|---|
+| Caller is not admin | Auth error |
+| Credit line not found | `ContractError::CreditLineNotFound` |
+| `credit_limit < utilized_amount` | `ContractError::OverLimit` |
+| `credit_limit < 0` | `ContractError::NegativeLimit` |
+| `interest_rate_bps > 10000` | `ContractError::RateTooHigh` |
+| `risk_score > 100` | `ContractError::ScoreTooHigh` |
+| Rate delta exceeds max | `"rate change exceeds maximum allowed delta"` |
+| Too soon since last change | `"rate change too soon: minimum interval not elapsed"` |
+
+Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, new score.
+
+#### Security notes
+- Rate-change config is optional and stored in instance storage.
+- Absence of config means **no limits** — fully backward-compatible.
+- `last_rate_update_ts = 0` (never updated) always bypasses the interval check,
+  so the first rate change is never blocked by the time window.
+- The delta check uses `abs_diff` which is symmetric and overflow-safe.
 
 ### `suspend_credit_line(env, borrower)`
 Suspend an Active credit line (admin only).
@@ -128,6 +171,27 @@ Emits: `("credit", "reinstate")` event.
 
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
 View function — returns credit line data or `None`.
+
+---
+
+## Error Codes
+
+The `Credit` contract uses standard `u32` discriminants for standardized error handling across the Rust and TypeScript SDK clients. Integrator clients can match these error codes to understand failure reasons.
+
+| Error Code | Variant | Description |
+|---|---|---|
+| `1` | `Unauthorized` | Caller is not authorized to perform this action. |
+| `2` | `NotAdmin` | Caller does not have admin privileges. |
+| `3` | `CreditLineNotFound` | The specified credit line was not found. |
+| `4` | `CreditLineClosed` | Action cannot be performed because the credit line is closed. |
+| `5` | `InvalidAmount` | The requested amount is invalid (e.g., zero or negative). |
+| `6` | `OverLimit` | The requested draw exceeds the available credit limit. |
+| `7` | `NegativeLimit` | The credit limit cannot be negative. |
+| `8` | `RateTooHigh` | The interest rate change exceeds the maximum allowed delta. |
+| `9` | `ScoreTooHigh` | The risk score is above the acceptable maximum threshold. |
+| `10` | `UtilizationNotZero` | Action cannot be performed because the credit line utilization is not zero. |
+| `11` | `Reentrancy` | Reentrancy detected during cross-contract calls. |
+| `12` | `Overflow` | Math overflow occurred during calculation. |
 
 ---
 

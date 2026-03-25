@@ -1,40 +1,4 @@
-//! # Creditra Credit Contract
-//!
-//! This module implements the on-chain credit line protocol for Creditra on
-//! Stellar Soroban. It manages the full lifecycle of borrower credit lines —
-//! opening, drawing, repaying, suspending, closing, and defaulting.
-//!
-//! ## Roles
-//!
-//! - **Admin**: Deployed and initialized by the protocol deployer. Authorized
-//!   to suspend, close, and default credit lines, and update risk parameters.
-//! - **Borrower**: An address with an open credit line. Authorized to draw
-//!   and repay funds within their credit limit.
-//! - **Risk Engine / Backend**: Authorized to open credit lines and update
-//!   risk parameters on behalf of the protocol.
-//!
-//! ## Main Flows
-//!
-//! 1. **Open**: Admin/backend calls `open_credit_line` to create a credit line
-//!    for a borrower with a limit, interest rate, and risk score.
-//! 2. **Draw**: Borrower calls `draw_credit` to borrow against their limit.
-//! 3. **Repay**: Borrower calls `repay_credit` to repay drawn funds.
-//! 4. **Suspend**: Admin calls `suspend_credit_line` to temporarily freeze a line.
-//! 5. **Close**: Admin or borrower calls `close_credit_line` to permanently close.
-//! 6. **Default**: Admin calls `default_credit_line` to mark a borrower as defaulted.
-//!
-//! ## Invariants
-//!
-//! - `utilized_amount` must never exceed `credit_limit`.
-//! - A credit line must exist before it can be suspended, closed, or defaulted.
-//! - Interest rate is expressed in basis points (1 bps = 0.01%).
-//!
-//! ## External Docs
-//!
-//! See [`docs/credit.md`](../../../docs/credit.md) for full documentation
-//! including CLI usage and deployment instructions.
-
-#![no_std]
+ #![no_std]
 #![allow(clippy::unused_unit)]
 
 //! Creditra credit contract: credit lines, draw/repay, risk parameters.
@@ -118,7 +82,7 @@ fn set_reentrancy_guard(env: &Env) {
     let key = reentrancy_key(env);
     let current: bool = env.storage().instance().get(&key).unwrap_or(false);
     if current {
-        env.panic_with_error(ContractError::Reentrancy);
+        panic!("reentrancy guard");
     }
     env.storage().instance().set(&key, &true);
 }
@@ -127,7 +91,6 @@ fn clear_reentrancy_guard(env: &Env) {
     env.storage().instance().set(&reentrancy_key(env), &false);
 }
 
-/// The Creditra credit contract.
 #[contract]
 pub struct Credit;
 
@@ -162,20 +125,6 @@ impl Credit {
         ()
     }
 
-    /// Open a new credit line for a borrower.
-    ///
-    /// Called by the backend or risk engine after off-chain credit assessment.
-    /// Creates a new [`CreditLineData`] record with `utilized_amount = 0` and
-    /// `status = Active`, then persists it keyed by the borrower's address.
-    ///
-    /// # Parameters
-    /// - `borrower`: The borrower's Stellar address.
-    /// - `credit_limit`: Maximum drawable amount.
-    /// - `interest_rate_bps`: Annual interest rate in basis points.
-    /// - `risk_score`: Risk score from the risk engine (0–100).
-    ///
-    /// # Events
-    /// Emits a `("credit", "opened")` [`CreditLineEvent`].
     /// Open a new credit line for a borrower (called by backend/risk engine).
     ///
     /// # Arguments
@@ -217,6 +166,7 @@ impl Credit {
                 "borrower already has an active credit line"
             );
         }
+
         let credit_line = CreditLineData {
             borrower: borrower.clone(),
             credit_limit,
@@ -320,7 +270,7 @@ impl Credit {
 
         if updated_utilized > credit_line.credit_limit {
             clear_reentrancy_guard(&env);
-            env.panic_with_error(ContractError::OverLimit);
+            panic!("exceeds credit limit");
         }
 
         if let Some(token_address) = token_address {
@@ -350,7 +300,6 @@ impl Credit {
         ()
     }
 
-    /// Repay credit (borrower).
     /// Repay outstanding credit drawn on an active, suspended, or defaulted credit line.
     ///
     /// The borrower calls this to reduce their `utilized_amount`. Repayment is
@@ -519,40 +468,43 @@ impl Credit {
             .storage()
             .persistent()
             .get(&borrower)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+            .expect("Credit line not found");
 
         if credit_limit < 0 {
-            env.panic_with_error(ContractError::NegativeLimit);
+            panic!("credit_limit must be non-negative");
         }
         if credit_limit < credit_line.utilized_amount {
-            env.panic_with_error(ContractError::OverLimit);
+            panic!("credit_limit cannot be less than utilized amount");
         }
         if interest_rate_bps > MAX_INTEREST_RATE_BPS {
-            env.panic_with_error(ContractError::RateTooHigh);
+            panic!("interest_rate_bps exceeds maximum");
         }
         if risk_score > MAX_RISK_SCORE {
-            env.panic_with_error(ContractError::ScoreTooHigh);
+            panic!("risk_score exceeds maximum");
         }
 
-        // --- Rate-change limit enforcement (#17) ---
-        let rate_cfg: Option<RateChangeConfig> = env.storage().instance().get(&rate_cfg_key(&env));
-        if let Some(cfg) = rate_cfg {
-            let old_rate = credit_line.interest_rate_bps;
-            if interest_rate_bps != old_rate {
-                // Check minimum interval between rate changes.
-                if credit_line.last_rate_update_ts > 0 && cfg.rate_change_min_interval > 0 {
+        // --- Rate-change limit enforcement ---
+        if let Some(cfg) = env
+            .storage()
+            .instance()
+            .get::<Symbol, RateChangeConfig>(&rate_cfg_key(&env))
+        {
+            if interest_rate_bps != credit_line.interest_rate_bps {
+                let old_rate = credit_line.interest_rate_bps;
+                let delta = interest_rate_bps.abs_diff(old_rate);
+
+                if delta > cfg.max_rate_change_bps {
+                    panic!("rate change exceeds maximum allowed delta");
+                }
+
+                if cfg.rate_change_min_interval > 0 && credit_line.last_rate_update_ts > 0 {
                     let now = env.ledger().timestamp();
                     let elapsed = now.saturating_sub(credit_line.last_rate_update_ts);
                     if elapsed < cfg.rate_change_min_interval {
                         panic!("rate change too soon: minimum interval not elapsed");
                     }
                 }
-                // Check absolute delta cap.
-                let delta = interest_rate_bps.abs_diff(old_rate);
-                if delta > cfg.max_rate_change_bps {
-                    panic!("rate change exceeds maximum allowed delta");
-                }
-                // Record the timestamp of this rate change.
+
                 credit_line.last_rate_update_ts = env.ledger().timestamp();
             }
         }
@@ -605,6 +557,7 @@ impl Credit {
     ///
     /// # Panics
     /// - If no credit line exists for the given borrower.
+    /// - If the credit line is not currently Active.
     ///
     /// # Events
     /// Emits a `("credit", "suspend")` [`CreditLineEvent`].
@@ -614,7 +567,7 @@ impl Credit {
             .storage()
             .persistent()
             .get(&borrower)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+            .expect("Credit line not found");
 
         if credit_line.status != CreditStatus::Active {
             panic!("Only active credit lines can be suspended");
@@ -664,7 +617,7 @@ impl Credit {
             .storage()
             .persistent()
             .get(&borrower)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+            .expect("Credit line not found");
 
         if credit_line.status == CreditStatus::Closed {
             return;
@@ -674,9 +627,9 @@ impl Credit {
 
         if !allowed {
             if closer == borrower {
-                env.panic_with_error(ContractError::UtilizationNotZero);
+                panic!("cannot close: utilized amount not zero");
             }
-            env.panic_with_error(ContractError::Unauthorized);
+            panic!("unauthorized");
         }
 
         credit_line.status = CreditStatus::Closed;
@@ -698,8 +651,8 @@ impl Credit {
 
     /// Mark a credit line as defaulted.
     ///
-    /// Called by admin when a borrower fails to repay. Defaulted credit lines
-    /// are permanently marked and cannot be reactivated.
+    /// Called by admin when a borrower fails to repay. Transition: Active or Suspended → Defaulted.
+    /// After this, draw_credit is disabled and repay_credit remains allowed.
     ///
     /// # Parameters
     /// - `borrower`: The borrower's address.
@@ -709,19 +662,13 @@ impl Credit {
     ///
     /// # Events
     /// Emits a `("credit", "default")` [`CreditLineEvent`].
-    /// Mark a credit line as defaulted (admin only).
-    ///
-    /// Call when the line is past due or when an oracle/off-chain signal indicates default.
-    /// Transition: Active or Suspended → Defaulted.
-    /// After this, draw_credit is disabled and repay_credit remains allowed.
-    /// Emits a CreditLineDefaulted event.
     pub fn default_credit_line(env: Env, borrower: Address) {
         require_admin_auth(&env);
         let mut credit_line: CreditLineData = env
             .storage()
             .persistent()
             .get(&borrower)
-            .unwrap_or_else(|| env.panic_with_error(ContractError::CreditLineNotFound));
+            .expect("Credit line not found");
 
         credit_line.status = CreditStatus::Defaulted;
         env.storage().persistent().set(&borrower, &credit_line);
@@ -773,20 +720,13 @@ impl Credit {
         );
     }
 
-    /// Retrieve the current credit line data for a borrower.
-    ///
-    /// View function — does not modify any state.
+    /// Get credit line data for a borrower (view function).
     ///
     /// # Parameters
-    /// - `borrower`: The borrower's address to look up.
+    /// - `borrower`: The address to query.
     ///
     /// # Returns
-    /// `Some(CreditLineData)` if a credit line exists, `None` otherwise.
-    /// Read-only getter for credit line by borrower
-    ///
-    /// @param borrower The address to query
-    /// @return Option<CreditLineData> Full data or None if no line exists
-    /// Get credit line data for a borrower (view function).
+    /// `Option<CreditLineData>` — full data or `None` if no line exists.
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
     }
@@ -815,7 +755,7 @@ mod test_repay_credit_109 {
     use soroban_sdk::testutils::{Address as _, Events};
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::{TryFromVal, TryIntoVal};
+    use soroban_sdk::{Symbol, TryFromVal, TryIntoVal};
 
     // ── helpers ───────────────────────────────────────────────────────────────
 

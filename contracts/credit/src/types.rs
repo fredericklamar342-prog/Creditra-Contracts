@@ -15,17 +15,29 @@ pub enum CreditStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum ContractError {
+    /// Caller is not authorized to perform this action.
     Unauthorized = 1,
+    /// Caller does not have admin privileges.
     NotAdmin = 2,
+    /// The specified credit line was not found.
     CreditLineNotFound = 3,
+    /// Action cannot be performed because the credit line is closed.
     CreditLineClosed = 4,
+    /// The requested amount is invalid (e.g., zero or negative where positive is expected).
     InvalidAmount = 5,
+    /// The requested draw exceeds the available credit limit.
     OverLimit = 6,
+    /// The credit limit cannot be negative.
     NegativeLimit = 7,
+    /// The interest rate change exceeds the maximum allowed delta.
     RateTooHigh = 8,
+    /// The risk score is above the acceptable maximum threshold.
     ScoreTooHigh = 9,
+    /// Action cannot be performed because the credit line utilization is not zero.
     UtilizationNotZero = 10,
+    /// Reentrancy detected during cross-contract calls.
     Reentrancy = 11,
+    /// Math overflow occurred during calculation.
     Overflow = 12,
 }
 

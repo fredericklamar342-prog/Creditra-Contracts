@@ -86,6 +86,9 @@ Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay 
 cargo test -p creditra-credit
 ```
 
+For test helper conventions (mock token balances/allowances in draw and repay
+scenarios), see `docs/contributing-tests.md`.
+
 ### Overflow scenario tests (large amounts)
 
 The credit contract includes dedicated overflow and large-value tests in
