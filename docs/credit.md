@@ -186,6 +186,8 @@ Marks a credit line as defaulted. Called by admin when the line is past due or w
 Panics if the credit line does not exist.  
 Emits: `("credit", "default")` event.
 
+Design reference: see `docs/default-oracle.md` for a Stellar-specific design to verify bounded oracle signals before (or alongside) admin default execution.
+
 ---
 
 ### `reinstate_credit_line(env, borrower)`
@@ -265,6 +267,11 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `get_credit_line` | Anyone (view) |
 
 > Note: On-chain authorization via `require_auth()` is not yet enforced in all functions. This is planned for a future release.
+
+### Related Admin Workflows
+
+- Default lifecycle: `default_credit_line` → optional `suspend_credit_line` containment → `reinstate_credit_line` or `close_credit_line`.
+- Oracle-assisted default design: `docs/default-oracle.md`.
 
 ---
 
