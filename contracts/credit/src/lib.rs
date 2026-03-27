@@ -31,7 +31,7 @@ use events::{
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
-use types::{CreditLineData, CreditStatus};
+use types::{CreditLineData, CreditStatus, RateChangeConfig};
 
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 const MAX_RISK_SCORE: u32 = 100;
@@ -58,22 +58,6 @@ fn require_admin_auth(env: &Env) -> Address {
 }
 
 #[contracttype]
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreditError {
-    CreditLineNotFound = 1,
-    InvalidCreditStatus = 2,
-    InvalidAmount = 3,
-    InsufficientUtilization = 4,
-    Unauthorized = 5,
-}
-
-impl From<CreditError> for soroban_sdk::Error {
-    fn from(val: CreditError) -> Self {
-        soroban_sdk::Error::from_contract_error(val as u32)
-    }
-}
-
-#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     LiquidityToken,
@@ -96,8 +80,6 @@ fn clear_reentrancy_guard(env: &Env) {
 fn rate_cfg_key(env: &Env) -> Symbol {
     Symbol::new(env, "rate_cfg")
 }
-
-use types::RateChangeConfig;
 
 #[contract]
 pub struct Credit;
@@ -586,12 +568,23 @@ mod test {
                 token_client: token::Client::new(env, &address),
             }
         }
-        fn address(&self) -> Address { self.address.clone() }
-        fn mint(&self, to: &Address, amount: i128) { self.admin_client.mint(to, &amount); }
-        fn approve(&self, from: &Address, spender: &Address, amount: i128, expires_at: u32) {
-            self.token_client.approve(from, spender, &amount, &expires_at);
+        fn address(&self) -> Address {
+            self.address.clone()
         }
-        fn balance(&self, address: &Address) -> i128 { self.token_client.balance(address) }
+
+        fn mint(&self, to: &Address, amount: i128) {
+            self.admin_client.mint(to, &amount);
+        }
+
+        fn approve(&self, from: &Address, spender: &Address, amount: i128, expires_at: u32) {
+            self.token_client
+                .approve(from, spender, &amount, &expires_at);
+        }
+
+        fn balance(&self, address: &Address) -> i128 {
+            self.token_client.balance(address)
+        }
+
         fn allowance(&self, from: &Address, spender: &Address) -> i128 {
             self.token_client.allowance(from, spender)
         }
@@ -994,7 +987,8 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+        let (client, _token, _admin) =
+            setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.draw_credit(&borrower, &400);
         client.default_credit_line(&borrower);
         client.repay_credit(&borrower, &150);
@@ -1208,7 +1202,8 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+        let (client, _token, admin) =
+            setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.draw_credit(&borrower, &300);
         client.default_credit_line(&borrower);
         client.close_credit_line(&borrower, &admin);
@@ -1291,13 +1286,23 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         let borrower = Address::generate(&env);
-        let (client, _token, _admin) = setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
+        let (client, _token, _admin) =
+            setup_contract_with_credit_line(&env, &borrower, 1_000, 1_000);
         client.default_credit_line(&borrower);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Defaulted);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Defaulted
+        );
         client.reinstate_credit_line(&borrower);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().status, CreditStatus::Active);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().status,
+            CreditStatus::Active
+        );
         client.draw_credit(&borrower, &200);
-        assert_eq!(client.get_credit_line(&borrower).unwrap().utilized_amount, 200);
+        assert_eq!(
+            client.get_credit_line(&borrower).unwrap().utilized_amount,
+            200
+        );
     }
 
     #[test]
