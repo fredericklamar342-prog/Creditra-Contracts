@@ -94,41 +94,16 @@ impl Credit {
     }
 
     /// @notice Sets the token contract used for reserve/liquidity checks and draw transfers.
-    /// @dev Admin-only.
-    pub fn set_liquidity_token(env: Env, token_address: Address) -> () {
-        require_admin_auth(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::LiquidityToken, &token_address);
-        ()
+    pub fn set_liquidity_token(env: Env, token_address: Address) {
+        config::set_liquidity_token(env, token_address)
     }
 
     /// @notice Sets the address that provides liquidity for draw operations.
-    /// @dev Admin-only. If unset, init config uses the contract address.
-    pub fn set_liquidity_source(env: Env, reserve_address: Address) -> () {
-        require_admin_auth(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::LiquiditySource, &reserve_address);
-        ()
+    pub fn set_liquidity_source(env: Env, reserve_address: Address) {
+        config::set_liquidity_source(env, reserve_address)
     }
 
     /// Open a new credit line for a borrower (called by backend/risk engine).
-    ///
-    /// # Arguments
-    /// * `borrower` - The address of the borrower
-    /// * `credit_limit` - Maximum borrowable amount (must be > 0)
-    /// * `interest_rate_bps` - Annual interest rate in basis points (max 10000 = 100%)
-    /// * `risk_score` - Borrower risk score (0–100)
-    ///
-    /// # Panics
-    /// * If `credit_limit` <= 0
-    /// * If `interest_rate_bps` > 10000
-    /// * If `risk_score` > 100
-    /// * If an Active credit line already exists for the borrower
-    ///
-    /// # Events
-    /// Emits `(credit, opened)` with a `CreditLineEvent` payload.
     pub fn open_credit_line(
         env: Env,
         borrower: Address,
@@ -492,25 +467,13 @@ impl Credit {
     }
 
     /// Set rate-change limits (admin only).
-    ///
-    /// Configures the maximum allowed interest-rate change per call and the
-    /// minimum time interval between consecutive rate changes.
-    pub fn set_rate_change_limits(
-        env: Env,
-        max_rate_change_bps: u32,
-        rate_change_min_interval: u64,
-    ) {
-        require_admin_auth(&env);
-        let cfg = RateChangeConfig {
-            max_rate_change_bps,
-            rate_change_min_interval,
-        };
-        env.storage().instance().set(&rate_cfg_key(&env), &cfg);
+    pub fn set_rate_change_limits(env: Env, max_rate_change_bps: u32, rate_change_min_interval: u64) {
+        risk::set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)
     }
 
     /// Get the current rate-change limit configuration (view function).
     pub fn get_rate_change_limits(env: Env) -> Option<RateChangeConfig> {
-        env.storage().instance().get(&rate_cfg_key(&env))
+        risk::get_rate_change_limits(env)
     }
 
     /// Suspend a credit line (admin only).
@@ -638,7 +601,7 @@ impl Credit {
     /// # Returns
     /// `Option<CreditLineData>` — full data or `None` if no line exists.
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
-        env.storage().persistent().get(&borrower)
+        query::get_credit_line(env, borrower)
     }
 }
 
