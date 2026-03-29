@@ -2,8 +2,7 @@ use crate::auth::require_admin_auth;
 use crate::storage::rate_cfg_key;
 use crate::events::{publish_risk_parameters_updated, RiskParametersUpdatedEvent};
 use crate::types::{CreditLineData, RateChangeConfig};
-use crate::Credit;
-use soroban_sdk::{contractimpl, Address, Env};
+use soroban_sdk::{Address, Env};
 
 /// Maximum interest rate in basis points (100%).
 pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -11,7 +10,6 @@ pub const MAX_INTEREST_RATE_BPS: u32 = 10_000;
 /// Maximum risk score (0–100 scale).
 pub const MAX_RISK_SCORE: u32 = 100;
 
-#[allow(dead_code)]
 pub fn update_risk_parameters(
         env: Env,
         borrower: Address,

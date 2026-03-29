@@ -1,10 +1,8 @@
 use crate::auth::{require_admin, require_admin_auth};
 use crate::events::{publish_credit_line_event, CreditLineEvent};
 use crate::types::{CreditLineData, CreditStatus};
-use crate::Credit;
-use soroban_sdk::{contractimpl, symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env};
 
-#[allow(dead_code)]
 pub fn open_credit_line(
         env: Env,
         borrower: Address,

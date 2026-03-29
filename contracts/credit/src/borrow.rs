@@ -1,10 +1,8 @@
 use crate::storage::{clear_reentrancy_guard, set_reentrancy_guard, DataKey};
 use crate::events::{publish_drawn_event, publish_repayment_event, DrawnEvent, RepaymentEvent};
 use crate::types::{CreditLineData, CreditStatus};
-use crate::Credit;
-use soroban_sdk::{contractimpl, token, Address, Env};
+use soroban_sdk::{token, Address, Env};
 
-#[allow(dead_code)]
 pub fn draw_credit(env: Env, borrower: Address, amount: i128) {
         set_reentrancy_guard(&env);
         borrower.require_auth();

@@ -1,10 +1,8 @@
 use crate::auth::require_admin_auth;
 use crate::storage::admin_key;
 use crate::storage::DataKey;
-use crate::Credit;
-use soroban_sdk::{contractimpl, Address, Env};
+use soroban_sdk::{Address, Env};
 
-#[allow(dead_code)]
 pub fn init(env: Env, admin: Address) {
         env.storage().instance().set(&admin_key(&env), &admin);
         env.storage()
