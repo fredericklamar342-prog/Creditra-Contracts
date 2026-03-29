@@ -65,6 +65,17 @@ pub struct DrawnEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when interest is accrued and capitalized.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterestAccruedEvent {
+    pub borrower: Address,
+    pub accrued_amount: i128,
+    pub total_accrued_interest: i128,
+    pub new_utilized_amount: i128,
+    pub timestamp: u64,
+}
+
 /// Publish a credit line lifecycle event.
 pub fn publish_credit_line_event(env: &Env, topic: (Symbol, Symbol), event: CreditLineEvent) {
     env.events().publish(topic, event);
@@ -86,4 +97,10 @@ pub fn publish_drawn_event(env: &Env, event: DrawnEvent) {
 pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("risk_upd")), event);
+}
+
+/// Publish an interest accrued event.
+pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
 }

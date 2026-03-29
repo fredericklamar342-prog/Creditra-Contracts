@@ -14,6 +14,8 @@ pub enum CreditStatus {
     Defaulted = 2,
     /// Credit line is permanently closed.
     Closed = 3,
+    /// Credit limit was decreased below utilized amount; excess must be repaid.
+    Restricted = 4,
 }
 
 /// Errors that can be returned by the Credit contract.
@@ -45,6 +47,8 @@ pub enum ContractError {
     Reentrancy = 11,
     /// Math overflow occurred during calculation.
     Overflow = 12,
+    /// Credit limit decrease requires immediate repayment of excess amount.
+    LimitDecreaseRequiresRepayment = 13,
 }
 
 /// Stored credit line data for a borrower.
@@ -65,6 +69,12 @@ pub struct CreditLineData {
     /// Ledger timestamp of the last interest-rate update.
     /// Zero means no rate update has occurred yet.
     pub last_rate_update_ts: u64,
+    /// Total accrued interest that has been added to the utilized amount.
+    /// This tracks the cumulative interest that has been capitalized.
+    pub accrued_interest: i128,
+    /// Ledger timestamp of the last interest accrual calculation.
+    /// Zero means no accrual has been calculated yet.
+    pub last_accrual_ts: u64,
 }
 
 /// Admin-configurable limits on interest-rate changes.
