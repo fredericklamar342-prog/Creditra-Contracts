@@ -628,6 +628,7 @@ mod test {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
+    use soroban_sdk::testutils::Events;
     use soroban_sdk::token;
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::Symbol;

@@ -73,6 +73,8 @@ WASM output is at `target/wasm32-unknown-unknown/release/creditra_credit.wasm`. 
 - `strip = "symbols"` (no debug symbols in release)
 - `codegen-units = 1` (better optimization)
 
+CI enforces a size budget of 50 KB (`51200` bytes) for this artifact to ensure deployability and fast runtime.
+
 Avoid large dependencies; prefer minimal use of the Soroban SDK surface to stay within practical Soroban deployment limits.
 
 ### Run tests
