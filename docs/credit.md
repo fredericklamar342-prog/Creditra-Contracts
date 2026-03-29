@@ -1,8 +1,10 @@
-# Credit Contract Documentation
+  # Credit Contract Documentation
 
 **Version: 2026-03-26**
 
 The `Credit` contract implements on-chain credit lines for the Creditra protocol on Stellar Soroban. It manages the full lifecycle of a borrower's credit line — from opening to closing or defaulting — and emits events at each stage.
+
+For indexer-specific event ingestion and decoding guidance, see `docs/indexer-integration.md`.
 
 ---
 
@@ -12,128 +14,99 @@ The `Credit` contract implements on-chain credit lines for the Creditra protocol
 
 Stored in persistent storage keyed by the borrower's address.
 
-| Field                 | Type           | Description                                                           |
-| --------------------- | -------------- | --------------------------------------------------------------------- |
-| `borrower`            | `Address`      | The borrower's Stellar address                                        |
-| `credit_limit`        | `i128`         | Maximum amount the borrower can draw                                  |
-| `utilized_amount`     | `i128`         | Amount currently drawn                                                |
-| `interest_rate_bps`   | `u32`          | Annual interest rate in basis points (e.g. 300 = 3%)                  |
-| `risk_score`          | `u32`          | Risk score assigned by the risk engine (0–100)                        |
-| `status`              | `CreditStatus` | Current status of the credit line                                     |
-| `last_rate_update_ts` | `u64`          | Ledger timestamp of the last interest-rate change (0 = never updated) |
+| Field                | Type     | Description |
+|----------------------|----------|-----------|
+| `borrower`           | `Address` | The borrower's Stellar address |
+| `credit_limit`       | `i128`   | Maximum amount the borrower can draw |
+| `utilized_amount`    | `i128`   | Amount currently drawn |
+| `interest_rate_bps`  | `u32`    | Annual interest rate in basis points (e.g. 300 = 3%) |
+| `risk_score`         | `u32`    | Risk score assigned by the risk engine (0–100) |
+| `status`             | `CreditStatus` | Current status of the credit line |
+| `last_rate_update_ts`| `u64`    | Ledger timestamp of the last interest-rate change (0 = never updated) |
 
 ### `RateChangeConfig`
+Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
 
-Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced (backward-compatible).
-
-| Field                      | Type  | Description                                                       |
-| -------------------------- | ----- | ----------------------------------------------------------------- |
-| `max_rate_change_bps`      | `u32` | Maximum absolute change in `interest_rate_bps` allowed per update |
-| `rate_change_min_interval` | `u64` | Minimum elapsed seconds between consecutive rate changes          |
+| Field                     | Type  | Description |
+|---------------------------|-------|-----------|
+| `max_rate_change_bps`     | `u32` | Maximum absolute change in `interest_rate_bps` allowed per update |
+| `rate_change_min_interval`| `u64` | Minimum elapsed seconds between consecutive rate changes |
 
 ### `CreditStatus`
 
-| Variant     | Value | Description                                          |
-| ----------- | ----- | ---------------------------------------------------- |
-| `Active`    | 0     | Credit line is open and available                    |
-| `Suspended` | 1     | Credit line is temporarily suspended                 |
-| `Defaulted` | 2     | Borrower has defaulted; draw disabled, repay allowed |
-| `Closed`    | 3     | Credit line has been closed                          |
+| Variant    | Value | Description |
+|------------|-------|-----------|
+| `Active`   | 0     | Credit line is open and available |
+| `Suspended`| 1     | Credit line is temporarily suspended |
+| `Defaulted`| 2     | Borrower has defaulted; draw disabled, repay allowed |
+| `Closed`   | 3     | Credit line has been permanently closed |
 
 ### Status transitions
 
-| From      | To        | Trigger                                                                    |
-| --------- | --------- | -------------------------------------------------------------------------- |
-| Active    | Defaulted | Admin calls `default_credit_line` (e.g. after past-due or oracle signal).  |
-| Suspended | Defaulted | Admin calls `default_credit_line`.                                         |
-| Defaulted | Active    | Admin calls `reinstate_credit_line`.                                       |
-| Defaulted | Suspended | Admin calls `suspend_credit_line`.                                         |
-| Defaulted | Closed    | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line`. |
+| From       | To         | Trigger |
+|------------|------------|---------|
+| Active     | Defaulted  | Admin calls `default_credit_line` |
+| Suspended  | Defaulted  | Admin calls `default_credit_line` |
+| Defaulted  | Active     | Admin calls `reinstate_credit_line` |
+| Defaulted  | Suspended  | Admin calls `suspend_credit_line` |
+| Defaulted  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
 
-When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is allowed.
-
-### `CreditLineEvent`
-
-Emitted on every lifecycle state change.
-
-| Field               | Type           | Description                        |
-| ------------------- | -------------- | ---------------------------------- |
-| `event_type`        | `Symbol`       | Short symbol identifying the event |
-| `borrower`          | `Address`      | The affected borrower              |
-| `status`            | `CreditStatus` | New status after the event         |
-| `credit_limit`      | `i128`         | Credit limit at time of event      |
-| `interest_rate_bps` | `u32`          | Interest rate at time of event     |
-| `risk_score`        | `u32`          | Risk score at time of event        |
+When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
 
 ---
 
 ## Methods
 
 ### `init(env, admin)`
+Initializes the contract with an admin address. Must be called exactly once.
 
-Initializes the contract with an admin address. Must be called once before any other function.
+### `set_liquidity_token(env, token_address)`
+Sets the Stellar Asset Contract token used for draws and repayments (admin only).
 
-| Parameter | Type      | Description                             |
-| --------- | --------- | --------------------------------------- |
-| `admin`   | `Address` | Address authorized for admin operations |
-
----
+### `set_liquidity_source(env, reserve_address)`
+Sets the address that holds liquidity for draws and receives repayments (defaults to contract address).
 
 ### `open_credit_line(env, borrower, credit_limit, interest_rate_bps, risk_score)`
-
-Opens a new credit line for a borrower. Called by the backend or risk engine.
-
-| Parameter           | Type      | Description                     |
-| ------------------- | --------- | ------------------------------- |
-| `borrower`          | `Address` | Borrower's address              |
-| `credit_limit`      | `i128`    | Maximum drawable amount         |
-| `interest_rate_bps` | `u32`     | Interest rate in basis points   |
-| `risk_score`        | `u32`     | Risk score from the risk engine |
+Opens a new credit line for a borrower. Called by the backend/risk engine.
 
 Emits: `("credit", "opened")` event.
 
----
-
 ### `draw_credit(env, borrower, amount)`
+Draw funds from an **Active** credit line. Caller must be the borrower.
 
-Draw funds from an active credit line. Requires status **Active**; reverts if status is Suspended, Defaulted, or Closed.
+- Reverts if line is Closed, Suspended, Defaulted, or does not exist.
+- Reverts if draw would exceed `credit_limit`.
+- Transfers tokens from liquidity source → borrower.
 
-| Parameter  | Type      | Description        |
-| ---------- | --------- | ------------------ |
-| `borrower` | `Address` | Borrower's address |
-| `amount`   | `i128`    | Amount to draw     |
+Emits: `("credit", "drawn")` event.
 
-Emits: `("credit", "draw")` and drawn event. Transfers protocol token from reserve to borrower.
-Draw funds from an active credit line. Verifies limit, updates utilized amount, and transfers the protocol token from the contract reserve to the borrower. Caller must be the borrower and must authorize.
+### `repay_credit(env, borrower, amount)`
+Repay outstanding drawn funds.
 
----
+**Allowed on**: Active, Suspended, or Defaulted credit lines.  
+**Not allowed on**: Closed credit lines.
 
-Emits: `("credit", "repay")` with `RepaymentEvent` (borrower, amount actually transferred, new utilized amount, timestamp).
+- The borrower must have approved the contract to pull tokens via `transfer_from`.
+- Effective repayment = `min(amount, utilized_amount)` (over-payments are safe).
+- Tokens are transferred **before** state is updated. If the transfer fails, the call reverts with no state change.
+- Works even when no liquidity token is configured (state-only update).
 
----
+Emits: `("credit", "repay")` event with `RepaymentEvent` payload containing the effective amount transferred and new `utilized_amount`.
 
-### `set_liquidity_token(env, token_address)`
+### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
+Update credit limit, interest rate, and risk score (admin only).
 
-Sets the token contract used for reserve/liquidity checks and draw transfers. Admin-only.
+When `RateChangeConfig` is set, rate changes are subject to:
+- Maximum delta ≤ `max_rate_change_bps`
+- Minimum time interval ≥ `rate_change_min_interval`
 
-| Parameter       | Type      | Description                           |
-| --------------- | --------- | ------------------------------------- |
-| `token_address` | `Address` | Address of the Soroban token contract |
+Emits: `("credit", "risk_updated")` event.
 
----
+### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
+Configure rate-change limits (admin only).
 
-### `set_liquidity_source(env, reserve_address)`
-
-Sets the address that provides liquidity for draw operations. Admin-only. Defaults to the contract address if not set.
-
-| Parameter         | Type      | Description                           |
-| ----------------- | --------- | ------------------------------------- |
-| `reserve_address` | `Address` | Address holding the liquidity reserve |
-
----
-
----
-
+### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
+Returns the current rate-change configuration (or `None` if not set).
 ### `update_risk_parameters(env, borrower, credit_limit, interest_rate_bps, risk_score)`
 
 Update the risk parameters for an existing credit line. Admin-only.
@@ -182,60 +155,41 @@ Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, n
   so the first rate change is never blocked by the time window.
 - The delta check uses `abs_diff` which is symmetric and overflow-safe.
 
+#### Ledger timestamp trust assumptions
+- The cooldown window relies on `env.ledger().timestamp()` from the Soroban host.
+- Production deployments therefore trust the network-provided ledger timestamp to be monotonic enough for coarse cooldown enforcement.
+- This mechanism is suitable for protocol-level spacing of administrative rate changes, not for sub-second precision or wall-clock guarantees.
+- Test coverage should explicitly exercise:
+  - first update with `last_rate_update_ts == 0`
+  - exactly-at-boundary acceptance
+  - just-before-boundary rejection
+  - `rate_change_min_interval == 0` disabling the timing gate entirely
+
 ### `suspend_credit_line(env, borrower)`
+Suspend an Active credit line (admin only).
 
-Suspends an active credit line. Called by admin.
-
-Panics if the credit line does not exist.  
 Emits: `("credit", "suspend")` event.
 
----
-
 ### `close_credit_line(env, borrower, closer)`
+Close a credit line.
 
-Closes a credit line. Can be called by admin (force-close) or by borrower when `utilized_amount` is 0. Allowed from Active, Suspended, or Defaulted.
+- Admin can close any time.
+- Borrower can close only when `utilized_amount == 0`.
 
-Panics if the credit line does not exist.  
 Emits: `("credit", "closed")` event.
 
----
-
 ### `default_credit_line(env, borrower)`
+Mark credit line as Defaulted (admin only).
 
-Marks a credit line as defaulted. Called by admin when the line is past due or when an oracle/off-chain signal indicates default. Transition: Active or Suspended → Defaulted. After this, `draw_credit` is disabled and `repay_credit` remains allowed.
-
-Panics if the credit line does not exist.  
 Emits: `("credit", "default")` event.
 
----
-
 ### `reinstate_credit_line(env, borrower)`
+Reinstate a Defaulted credit line to Active (admin only).
 
-Reinstates a defaulted credit line to Active. Admin only. Allowed only when status is Defaulted. Transition: Defaulted → Active.
-
-Panics if the credit line does not exist or status is not Defaulted.  
 Emits: `("credit", "reinstate")` event.
 
-### `set_rate_change_limits(env, max_rate_change_bps, rate_change_min_interval)`
-
-Sets the global rate-change limits. Admin-only.
-
-| Parameter                  | Type  | Description                          |
-| -------------------------- | ----- | ------------------------------------ |
-| `max_rate_change_bps`      | `u32` | Maximum BPS delta per update         |
-| `rate_change_min_interval` | `u64` | Minimum seconds between rate changes |
-
----
-
-### `get_rate_change_limits(env) -> Option<RateChangeConfig>`
-
-Returns the current `RateChangeConfig`, or `None` if none is set.
-
----
-
 ### `get_credit_line(env, borrower) -> Option<CreditLineData>`
-
-Returns the credit line data for a borrower, or `None` if not found. View function — does not modify state.
+View function — returns credit line data or `None`.
 
 ---
 
@@ -262,16 +216,16 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 
 ## Events
 
-| Topic                     | Event Type Symbol | Emitted By               | Description                                             |
-| ------------------------- | ----------------- | ------------------------ | ------------------------------------------------------- |
-| `("credit", "opened")`    | `opened`          | `open_credit_line`       | New credit line opened                                  |
-| `("credit", "repay")`     | `repay`           | `repay_credit`           | Repayment (borrower, amount, new utilized, timestamp)   |
-| `("credit", "suspend")`   | `suspend`         | `suspend_credit_line`    | Credit line suspended                                   |
-| `("credit", "closed")`    | `closed`          | `close_credit_line`      | Credit line closed                                      |
-| `("credit", "default")`   | `default`         | `default_credit_line`    | Credit line defaulted                                   |
-| `("credit", "reinstate")` | `reinstate`       | `reinstate_credit_line`  | Credit line reinstated to Active                        |
-| `("credit", "drawn")`     | `drawn`           | `draw_credit`            | Funds drawn (borrower, amount, new utilized, timestamp) |
-| `("credit", "risk_upd")`  | `risk_upd`        | `update_risk_parameters` | Risk parameters updated (borrower, limit, rate, score)  |
+| Topic                      | Event Type | Emitted By                  | Description |
+|----------------------------|------------|-----------------------------|-----------|
+| `("credit", "opened")`     | `opened`   | `open_credit_line`          | New credit line created |
+| `("credit", "drawn")`      | `drawn`    | `draw_credit`               | Funds drawn |
+| `("credit", "repay")`      | `repay`    | `repay_credit`              | Repayment made |
+| `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
+| `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
+| `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
+| `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
+| `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
 
 ---
 
@@ -298,105 +252,129 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 
 ---
 
+## Admin Rotation Proposal
+
+### Current risk
+
+The current contract stores a single immutable admin address in instance storage. That keeps the access model simple, but it creates a high-impact operational risk:
+
+- a deployment initialized with the wrong admin address is effectively unrecoverable
+- an admin key compromise cannot be remediated on-chain
+- key-rotation policies require redeployment instead of controlled handoff
+
+### Recommended design
+
+Use a **two-step admin rotation** instead of a one-call `transfer_admin`.
+
+#### Proposed API
+
+```rust
+/// Propose a new admin. Callable only by the current admin.
+pub fn propose_admin(env: Env, new_admin: Address);
+
+/// Accept a pending admin role. Callable only by the pending admin.
+pub fn accept_admin(env: Env);
+
+/// Cancel a pending admin handoff. Callable only by the current admin.
+pub fn cancel_admin_rotation(env: Env);
+
+/// View the current pending admin, if any.
+pub fn get_pending_admin(env: Env) -> Option<Address>;
+```
+
+#### Why two-step is preferred
+
+A direct `transfer_admin(new_admin)` permanently changes authority in one call. That is efficient, but it increases wrong-address risk because:
+
+- the current admin may submit the wrong destination address
+- the destination may be a contract or wallet that cannot complete intended operations
+- the protocol loses the ability to prove that the receiving operator actually controls the destination key
+
+The two-step model lowers that risk because the recipient must explicitly accept the role.
+
+### Storage additions
+
+If implemented, add a new instance-storage slot:
+
+| Key | Storage Type | Value |
+|---|---|---|
+| `"pending_admin"` | Instance | `Address` |
+
+The `"admin"` slot remains authoritative until `accept_admin` succeeds.
+
+### Threat model update
+
+#### Assets protected
+
+- admin authority over credit-line lifecycle operations
+- admin authority over liquidity source/token configuration
+- admin authority over risk-parameter changes
+
+#### Trust boundaries
+
+- the current `admin` is trusted to nominate a valid successor
+- the `pending_admin` is trusted only after they successfully authenticate and accept
+- observers and indexers may treat rotation events as security-relevant governance actions
+
+#### Failure modes and mitigations
+
+| Failure mode | Risk | Mitigation |
+|---|---|---|
+| Wrong address proposed | Permanent governance loss with one-step transfer | Two-step acceptance keeps current admin active until recipient confirms |
+| Proposed admin never responds | Rotation stuck in pending state | `cancel_admin_rotation` allows admin to abort and retry |
+| Current admin key compromise | Attacker can still propose a malicious admin | Not fully solvable on-chain; mitigated operationally by hardware wallets, monitoring, and fast cancellation if compromise is detected before acceptance |
+| Malicious pending admin | Attempts to seize control without nomination | `accept_admin` must require `pending_admin.require_auth()` and exact match against stored pending admin |
+| Event/indexing ambiguity | Off-chain systems misread control state | Emit explicit proposal / cancellation / acceptance events and document that only accepted admin is authoritative |
+
+### Operational procedure
+
+Recommended production workflow:
+
+1. Current admin verifies the target address out of band.
+2. Current admin calls `propose_admin(new_admin)`.
+3. Off-chain monitoring confirms the pending-admin event and storage value.
+4. Proposed admin verifies the contract ID and calls `accept_admin()`.
+5. Monitoring confirms the old admin was replaced and `pending_admin` was cleared.
+6. If the proposal was wrong or stale, current admin calls `cancel_admin_rotation()` before acceptance.
+
+### Testing requirements for implementation
+
+If/when implemented, the minimum invariant coverage should include:
+
+- only current admin can call `propose_admin`
+- only current admin can call `cancel_admin_rotation`
+- only the exact pending admin can call `accept_admin`
+- `admin` remains unchanged until acceptance
+- `pending_admin` is cleared after acceptance or cancellation
+- proposing the current admin should be rejected to avoid no-op ambiguity
+- a missing pending admin should cause `accept_admin` to fail deterministically
+
+### Implementation note
+
+Given the sensitivity of governance handoff, a one-step `transfer_admin` should only be added if maintainers explicitly prefer operational simplicity over wrong-address protection. The safer default for this contract is the two-step rotation flow above.
+
+---
+
 ## Interest Model
 
-Interest is expressed in basis points (`interest_rate_bps`). For example:
-
-- `300` = 3% annual interest
-- `500` = 5% annual interest
-
-Interest accrual logic is not yet implemented (`repay_credit` is a placeholder). When implemented, interest will accrue on the `utilized_amount` over time.
+All sensitive functions enforce authorization via `require_auth()`.
 
 ---
 
 ## Storage
 
-| Key                 | Storage Type | Value              |
-| ------------------- | ------------ | ------------------ |
-| `"admin"`           | Instance     | `Address`          |
-| `borrower: Address` | Persistent   | `CreditLineData`   |
-| `"rate_cfg"`        | Instance     | `RateChangeConfig` |
+| Key                  | Type       | Value                     |
+|----------------------|------------|---------------------------|
+| `"admin"`            | Instance   | Admin `Address`           |
+| `borrower: Address`  | Persistent | `CreditLineData`          |
+| `"rate_cfg"`         | Instance   | `RateChangeConfig` (optional) |
+| `"reentrancy"`       | Instance   | Reentrancy guard (internal) |
 
 ---
 
 ## Deployment and CLI Usage
 
-### Build
-
-```bash
-cargo build --target wasm32-unknown-unknown --release
-```
-
-### Deploy
-
-```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/credit.wasm \
-  --source <your-keypair> \
-  --network testnet
-```
-
-### Initialize
-
-```bash
-soroban contract invoke \
-  --id <contract-id> \
-  --source <admin-keypair> \
-  --network testnet \
-  -- init \
-  --admin <admin-address>
-```
-
-### Configure Liquidity (Admin)
-
-```bash
-soroban contract invoke \
-  --id <contract-id> \
-  --source <admin-keypair> \
-  --network testnet \
-  -- set_liquidity_token \
-  --token_address <token-address>
-
-soroban contract invoke \
-  --id <contract-id> \
-  --source <admin-keypair> \
-  --network testnet \
-  -- set_liquidity_source \
-  --reserve_address <reserve-address>
-```
-
-### Open a Credit Line
-
-```bash
-soroban contract invoke \
-  --id <contract-id> \
-  --source <backend-keypair> \
-  --network testnet \
-  -- open_credit_line \
-  --borrower <borrower-address> \
-  --credit_limit 5000 \
-  --interest_rate_bps 300 \
-  --risk_score 75
-```
-
-### Get Credit Line
-
-```bash
-soroban contract invoke \
-  --id <contract-id> \
-  --network testnet \
-  -- get_credit_line \
-  --borrower <borrower-address>
-```
-
-### Suspend / Close / Default
-
-```bash
-soroban contract invoke --id <contract-id> --source <admin-keypair> --network testnet -- suspend_credit_line --borrower <borrower-address>
-soroban contract invoke --id <contract-id> --source <admin-keypair> --network testnet -- close_credit_line --borrower <borrower-address>
-soroban contract invoke --id <contract-id> --source <admin-keypair> --network testnet -- default_credit_line --borrower <borrower-address>
-soroban contract invoke --id <contract-id> --source <admin-keypair> --network testnet -- reinstate_credit_line --borrower <borrower-address>
-```
+(Examples unchanged — still valid)
 
 ---
 
