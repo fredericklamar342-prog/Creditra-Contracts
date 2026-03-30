@@ -1485,8 +1485,8 @@ mod test_smoke_coverage {
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
 
-        // No init — open_credit_line must panic because admin is not set.
-        client.open_credit_line(&borrower, &500_i128, &200_u32, &50_u32);
+        // No init — suspend_credit_line requires admin, must panic because admin is not set.
+        client.suspend_credit_line(&borrower);
     }
 
     /// LiquiditySource default is deterministic: always the contract address.
