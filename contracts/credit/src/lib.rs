@@ -9,7 +9,13 @@
 //! defense-in-depth measure; if a token or future integration ever called back, the guard
 //! would revert.
 
+mod auth;
+mod config;
 mod events;
+mod lifecycle;
+mod query;
+mod risk;
+mod storage;
 pub mod types;
 
 use soroban_sdk::{
@@ -21,7 +27,7 @@ use events::{
     publish_risk_parameters_updated, CreditLineEvent, DrawnEvent, RepaymentEvent,
     RiskParametersUpdatedEvent,
 };
-use types::{CreditLineData, CreditStatus, RateChangeConfig};
+use types::{CreditLineData, CreditStatus, RateChangeConfig, ContractError};
 
 /// Maximum interest rate in basis points (100%).
 const MAX_INTEREST_RATE_BPS: u32 = 10_000;
@@ -138,6 +144,8 @@ impl Credit {
             risk_score,
             status: CreditStatus::Active,
             last_rate_update_ts: 0,
+            accrued_interest: 0,
+            last_accrual_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);

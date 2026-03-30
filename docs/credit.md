@@ -439,9 +439,358 @@ All sensitive functions enforce authorization via `require_auth()`.
 
 ---
 
-## Deployment and CLI Usage
+## Deployment and Invocation Playbook
 
-(Examples unchanged — still valid)
+This section provides step-by-step instructions to deploy the contract on Stellar testnet,
+initialize it, configure liquidity, and invoke core methods.
+
+### Prerequisites
+
+- **Rust 1.75+** with `wasm32-unknown-unknown` target installed
+- **Stellar Soroban CLI** v21.0.0+: [install guide](https://developers.stellar.org/docs/tools-and-sdks/cli/install-soroban-cli)
+- **soroban-cli configured network**: add testnet or futurenet if not present
+- **Account on testnet**: funded with XLM for gas and operations
+
+### Step 1: Network and Identity Setup
+
+#### Configure Stellar Testnet
+
+```bash
+soroban network add --name testnet --rpc-url https://soroban-testnet.stellar.org:443 --network-passphrase "Test SDF Network ; September 2015"
+```
+
+#### Create or Import an Identity
+
+```bash
+# Generate a new identity (stores keypair in ~/.config/soroban/keys/)
+soroban keys generate admin --network testnet
+
+# Or import an existing keypair
+soroban keys generate admin --secret-key --network testnet
+# Then paste your secret key (starts with S...)
+```
+
+Verify the identity was created:
+
+```bash
+soroban keys ls
+```
+
+Fund the identity's address on testnet:
+1. Get the public key: `soroban keys show admin`
+2. Visit [Stellar Testnet Friendbot](https://friendbot.stellar.org/) and fund the address
+3. Wait for the transaction to confirm (~5 seconds)
+
+### Step 2: Build the Contract
+
+```bash
+# Build release WASM (optimized for size and deployment)
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown -p creditra-credit
+```
+
+The compiled WASM is at: `target/wasm32-unknown-unknown/release/creditra_credit.wasm`
+
+### Step 3: Deploy the Contract
+
+```bash
+# Deploy to testnet
+CONTRACT_ID=$(soroban contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/creditra_credit.wasm \
+  --source admin \
+  --network testnet)
+
+echo "Contract deployed at: $CONTRACT_ID"
+```
+
+Save the `CONTRACT_ID` in an environment variable for subsequent commands.
+
+### Step 4: Initialize the Contract
+
+```bash
+# Get the admin identity's public key
+ADMIN_PUBKEY=$(soroban keys show admin)
+
+# Initialize with admin
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- init --admin $ADMIN_PUBKEY
+```
+
+This sets the admin address and defaults the liquidity source to the contract address.
+
+### Step 5: Configure Liquidity Token and Source
+
+#### (Optional) Create a Test Liquidity Token
+
+If deploying a mock token for testing:
+
+```bash
+# Deploy a Stellar Asset Contract for USDC (testnet)
+USDC_CONTRACT=$(soroban contract deploy native \
+  --network testnet \
+  --source admin)
+
+echo "USDC contract at: $USDC_CONTRACT"
+```
+
+#### Set Liquidity Token
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- set_liquidity_token --token_address $USDC_CONTRACT
+```
+
+#### Set Liquidity Source (Reserve Account)
+
+The liquidity source is where reserve tokens are held. It can be the contract address,
+an external reserve account, or another contract.
+
+```bash
+# Option A: Keep contract as reserve (already set in init)
+# No additional action needed
+
+# Option B: Set a different reserve account
+RESERVE_PUBKEY=$(soroban keys show reserve)
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- set_liquidity_source --reserve_address $RESERVE_PUBKEY
+```
+
+### Step 6: Open a Credit Line
+
+Create a credit line for a borrower. This is typically called by the backend/risk engine.
+
+```bash
+# Generate or use an existing borrower identity
+soroban keys generate borrower --network testnet
+BORROWER_PUBKEY=$(soroban keys show borrower)
+
+# Open a credit line
+# - borrower: the borrower address
+# - credit_limit: 10000 (in smallest token unit, typically microunits)
+# - interest_rate_bps: 300 (3% annual interest)
+# - risk_score: 75 (out of 100)
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- open_credit_line \
+    --borrower $BORROWER_PUBKEY \
+    --credit_limit 10000 \
+    --interest_rate_bps 300 \
+    --risk_score 75
+```
+
+Verify the credit line was created:
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- get_credit_line --borrower $BORROWER_PUBKEY
+```
+
+### Step 7: Fund the Liquidity Reserve
+
+If using a liquidity token, the reserve account must hold sufficient balance for draws.
+
+```bash
+# If USDC contract is the token, fund the reserve
+# This example assumes the contract is the reserve
+soroban contract invoke \
+  --id $USDC_CONTRACT \
+  --source admin \
+  --network testnet \
+  -- mint --to $CONTRACT_ID --amount 50000
+
+# Verify reserve balance
+soroban contract invoke \
+  --id $USDC_CONTRACT \
+  --source admin \
+  --network testnet \
+  -- balance --id $CONTRACT_ID
+```
+
+### Step 8: Draw Credit
+
+A borrower draws against their credit line. This transfers tokens from the reserve to the borrower.
+
+```bash
+# Borrower draws 1000 units
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source borrower \
+  --network testnet \
+  -- draw_credit \
+    --borrower $BORROWER_PUBKEY \
+    --amount 1000
+```
+
+Verify the draw:
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- get_credit_line --borrower $BORROWER_PUBKEY
+```
+
+Expected result: `utilized_amount` should now be 1000.
+
+### Step 9: Repay Credit
+
+Borrowers repay their drawn amount. The tokens are transferred back to the liquidity source.
+
+#### Prerequisite: Approve Token Transfer
+
+The borrower must approve the contract to transfer tokens on their behalf.
+
+```bash
+# Borrower approves the contract to transfer up to 2000 units
+soroban contract invoke \
+  --id $USDC_CONTRACT \
+  --source borrower \
+  --network testnet \
+  -- approve \
+    --from $BORROWER_PUBKEY \
+    --spender $CONTRACT_ID \
+    --amount 2000 \
+    --expiration_ledger 1000000
+```
+
+#### Execute Repayment
+
+```bash
+# Borrower repays 500 units
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source borrower \
+  --network testnet \
+  -- repay_credit \
+    --borrower $BORROWER_PUBKEY \
+    --amount 500
+```
+
+Verify the repayment:
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- get_credit_line --borrower $BORROWER_PUBKEY
+```
+
+Expected result: `utilized_amount` should now be 500.
+
+### Step 10: Update Risk Parameters (Admin Only)
+
+The admin can adjust credit limits, interest rates, and risk scores.
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- update_risk_parameters \
+    --borrower $BORROWER_PUBKEY \
+    --credit_limit 20000 \
+    --interest_rate_bps 400 \
+    --risk_score 85
+```
+
+### Step 11: Manage Credit Line Status
+
+#### Suspend a Credit Line
+
+Prevent draws while allowing repayment.
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- suspend_credit_line --borrower $BORROWER_PUBKEY
+```
+
+#### Default a Credit Line
+
+Mark the borrower as in default (blocks draws, allows repayment).
+
+```bash
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- default_credit_line --borrower $BORROWER_PUBKEY
+```
+
+#### Close a Credit Line
+
+- **Admin**: can force-close at any time
+- **Borrower**: can only close when `utilized_amount` is 0
+
+```bash
+# Admin force-close
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source admin \
+  --network testnet \
+  -- close_credit_line \
+    --borrower $BORROWER_PUBKEY \
+    --closer $ADMIN_PUBKEY
+
+# Or borrower self-close (only when fully repaid)
+soroban contract invoke \
+  --id $CONTRACT_ID \
+  --source borrower \
+  --network testnet \
+  -- close_credit_line \
+    --borrower $BORROWER_PUBKEY \
+    --closer $BORROWER_PUBKEY
+```
+
+### Useful Quick Reference
+
+**Export identities to variables for scripting:**
+
+```bash
+ADMIN=$(soroban keys show admin)
+BORROWER=$(soroban keys show borrower)
+RESERVE=$(soroban keys show reserve)
+TOKEN=$USDC_CONTRACT
+CONTRACT=$CONTRACT_ID
+```
+
+**Query contract state:**
+
+```bash
+# Check a specific credit line
+soroban contract invoke --id $CONTRACT --source admin --network testnet -- get_credit_line --borrower $BORROWER
+
+# Check token balance
+soroban contract invoke --id $TOKEN --source admin --network testnet -- balance --id $CONTRACT
+```
+
+**Troubleshooting common errors:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `HostError: Error(Auth, InvalidAction)` | Identity not authorized | Ensure `--source` identity is loaded and has been funded |
+| `HostError: Value(ContractError(1))` | Credit line not found | Verify credit line was opened with correct borrower address |
+| `HostError: Error(Contract, InvalidContractData)` | Contract ID invalid or contract not deployed | Check `$CONTRACT_ID` and verify deployment succeeded |
+| `Insufficient liquidity reserve` | Reserve balance too low | Fund the reserve with more tokens via `mint` or transfer |
+| `Insufficient allowance` | Token approval too low | Increase borrower's approval via token `approve` |
 
 ---
 

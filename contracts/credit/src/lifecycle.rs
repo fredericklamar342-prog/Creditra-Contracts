@@ -36,6 +36,8 @@ pub fn open_credit_line(
             risk_score,
             status: CreditStatus::Active,
             last_rate_update_ts: 0,
+            accrued_interest: 0,
+            last_accrual_ts: 0,
         };
 
         env.storage().persistent().set(&borrower, &credit_line);
