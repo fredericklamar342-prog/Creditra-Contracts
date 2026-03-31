@@ -23,6 +23,8 @@ Stored in persistent storage keyed by the borrower's address.
 | `risk_score`         | `u32`    | Risk score assigned by the risk engine (0–100) |
 | `status`             | `CreditStatus` | Current status of the credit line |
 | `last_rate_update_ts`| `u64`    | Ledger timestamp of the last interest-rate change (0 = never updated) |
+| `accrued_interest`   | `i128`   | Cumulative capitalized interest recorded on the line |
+| `last_accrual_ts`    | `u64`    | Ledger timestamp of the last interest accrual checkpoint (0 = never accrued) |
 
 ### `RateChangeConfig`
 Stored in instance storage under the `"rate_cfg"` key. Optional — when absent, no rate-change limits are enforced.
@@ -40,16 +42,19 @@ Stored in instance storage under the `"rate_cfg"` key. Optional — when absent,
 | `Suspended`| 1     | Credit line is temporarily suspended |
 | `Defaulted`| 2     | Borrower has defaulted; draw disabled, repay allowed |
 | `Closed`   | 3     | Credit line has been permanently closed |
+| `Restricted` | 4   | Limit is below utilization; additional draws are blocked until cured |
 
 ### Status transitions
 
 | From       | To         | Trigger |
 |------------|------------|---------|
+| Active     | Suspended  | Admin calls `suspend_credit_line` |
 | Active     | Defaulted  | Admin calls `default_credit_line` |
 | Suspended  | Defaulted  | Admin calls `default_credit_line` |
 | Defaulted  | Active     | Admin calls `reinstate_credit_line` |
-| Defaulted  | Suspended  | Admin calls `suspend_credit_line` |
 | Defaulted  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+| Active     | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
+| Suspended  | Closed     | Admin or borrower (when `utilized_amount == 0`) calls `close_credit_line` |
 
 When status is **Defaulted**: `draw_credit` is disabled; `repay_credit` is still allowed.
 
@@ -96,7 +101,7 @@ Opens a new credit line for a borrower. Called by the backend or risk engine.
 | `interest_rate_bps` | `u32` | Annual interest rate in basis points (0–10000) |
 | `risk_score` | `u32` | Risk score from the risk engine (0–100) |
 
-`last_rate_update_ts` is initialized to `0` (no rate update has occurred yet).
+`last_rate_update_ts`, `accrued_interest`, and `last_accrual_ts` are initialized to `0`.
 
 #### Errors
 | Condition | Error |
@@ -224,7 +229,16 @@ Emits: `RiskParametersUpdatedEvent` with borrower, new credit limit, new rate, n
 ### `suspend_credit_line(env, borrower)`
 Suspend an Active credit line (admin only).
 
+- Reverts if the line does not exist.
+- Reverts unless the current status is `Active`.
+
 Emits: `("credit", "suspend")` event.
+
+### Interest accrual
+
+Interest accrual fields exist in storage, but scheduled/lazy accrual logic is not yet active in the contract.
+
+The intended implementation design is documented separately in [`docs/interest-accrual.md`](interest-accrual.md).
 
 ### `close_credit_line(env, borrower, closer)`
 Close a credit line.
