@@ -6,6 +6,7 @@ pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
     MaxDrawAmount,
+    SchemaVersion,
 }
 
 pub fn admin_key(env: &Env) -> Symbol {

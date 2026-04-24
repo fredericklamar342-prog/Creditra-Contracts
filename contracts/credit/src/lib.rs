@@ -44,6 +44,9 @@ const SECONDS_PER_YEAR: u64 = 31_536_000;
 /// Admin draw reversal window in seconds (1 hour).
 const DRAW_REVERSAL_WINDOW_SECS: u64 = 3_600;
 
+/// Storage schema version for instance storage layout.
+const SCHEMA_VERSION: u32 = 1;
+
 /// Per-borrower draw audit record used to validate bounded reversals.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,6 +102,9 @@ impl Credit {
         env.storage()
             .instance()
             .set(&DataKey::LiquiditySource, &env.current_contract_address());
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &SCHEMA_VERSION);
     }
 
     /// Propose a new admin with an optional acceptance delay.
@@ -686,6 +692,11 @@ impl Credit {
     /// Get the current per-transaction draw cap. Returns None when uncapped.
     pub fn get_max_draw_amount(env: Env) -> Option<i128> {
         env.storage().instance().get(&DataKey::MaxDrawAmount)
+    }
+
+    /// Get the current storage schema version.
+    pub fn get_schema_version(env: Env) -> Option<u32> {
+        env.storage().instance().get(&DataKey::SchemaVersion)
     }
 
     pub fn suspend_credit_line(env: Env, borrower: Address) {
@@ -1855,6 +1866,39 @@ mod test_smoke_coverage {
         let new_source = Address::generate(&env);
         client.set_liquidity_source(&new_source);
         // If we reach here without panic, admin was stored and LiquiditySource was writable.
+    }
+
+    #[test]
+    fn test_init_sets_schema_version() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn test_init_schema_version_stable_after_failed_reinit() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contract_id = env.register(Credit, ());
+        let client = CreditClient::new(&env, &contract_id);
+
+        client.init(&admin);
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.init(&attacker);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(client.get_schema_version(), Some(SCHEMA_VERSION));
     }
 
     /// Double-init must revert with AlreadyInitialized.
