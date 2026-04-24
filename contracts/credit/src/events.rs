@@ -156,6 +156,27 @@ pub struct InterestAccruedEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when a defaulted line is ready for liquidation auction orchestration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DefaultLiquidationRequestedEvent {
+    pub borrower: Address,
+    pub utilized_amount: i128,
+    pub timestamp: u64,
+}
+
+/// Event emitted when default liquidation proceeds are settled into credit accounting.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DefaultLiquidationSettledEvent {
+    pub borrower: Address,
+    pub settlement_id: Symbol,
+    pub recovered_amount: i128,
+    pub remaining_utilized_amount: i128,
+    pub status: CreditStatus,
+    pub timestamp: u64,
+}
+
 /// Versioned draw event with explicit recipient/source identifiers.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -240,6 +261,21 @@ pub fn publish_risk_parameters_updated(env: &Env, event: RiskParametersUpdatedEv
 pub fn publish_interest_accrued_event(env: &Env, event: InterestAccruedEvent) {
     env.events()
         .publish((symbol_short!("credit"), symbol_short!("accrue")), event);
+}
+
+/// Publish a default liquidation requested event.
+pub fn publish_default_liquidation_requested_event(
+    env: &Env,
+    event: DefaultLiquidationRequestedEvent,
+) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("liq_req")), event);
+}
+
+/// Publish a default liquidation settled event.
+pub fn publish_default_liquidation_settled_event(env: &Env, event: DefaultLiquidationSettledEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("liq_setl")), event);
 }
 
 /// Event emitted when a borrower's block status changes.

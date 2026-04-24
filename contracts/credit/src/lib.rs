@@ -711,6 +711,15 @@ impl Credit {
         lifecycle::default_credit_line(env, borrower)
     }
 
+    pub fn settle_default_liquidation(
+        env: Env,
+        borrower: Address,
+        recovered_amount: i128,
+        settlement_id: Symbol,
+    ) {
+        lifecycle::settle_default_liquidation(env, borrower, recovered_amount, settlement_id)
+    }
+
 // duplicate wrapper removed
 
     /// Get credit line data for a borrower (view function).

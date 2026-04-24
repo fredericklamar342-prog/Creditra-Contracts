@@ -314,7 +314,20 @@ Emits: `("credit", "closed")` event.
 ### `default_credit_line(env, borrower)`
 Mark credit line as Defaulted (admin only).
 
-Emits: `("credit", "default")` event.
+Emits:
+- `("credit", "default")` lifecycle event.
+- `("credit", "liq_req")` liquidation request event for auction orchestration.
+
+### `settle_default_liquidation(env, borrower, recovered_amount, settlement_id)`
+Apply auction liquidation proceeds to a defaulted line (admin only).
+
+- Accounting-only operation (no token transfer in this method).
+- Requires `status == Defaulted`.
+- Requires positive `recovered_amount` and `recovered_amount <= utilized_amount`.
+- Enforces one-time settlement per `(borrower, settlement_id)` to prevent replay.
+- If remaining `utilized_amount == 0`, status transitions to `Closed`.
+
+Emits: `("credit", "liq_setl")` event. When fully settled, also emits `("credit", "closed")`.
 
 ### `reinstate_credit_line(env, borrower, target_status)`
 Reinstate a Defaulted credit line to `target_status` (Active or Suspended). Admin only.
@@ -393,6 +406,8 @@ The `Credit` contract uses standard `u32` discriminants for standardized error h
 | `("credit", "suspend")`    | `suspend`  | `suspend_credit_line`       | Line suspended |
 | `("credit", "closed")`     | `closed`   | `close_credit_line`         | Line closed |
 | `("credit", "default")`    | `default`  | `default_credit_line`       | Line defaulted |
+| `("credit", "liq_req")`    | `liq_req`  | `default_credit_line`       | Default liquidation requested |
+| `("credit", "liq_setl")`   | `liq_setl` | `settle_default_liquidation`| Auction settlement applied to debt accounting |
 | `("credit", "reinstate")`  | `reinstate`| `reinstate_credit_line`     | Line reinstated |
 | `("credit", "risk_updated")`| `risk_updated` | `update_risk_parameters` | Risk parameters changed |
 
@@ -415,6 +430,7 @@ like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
 | `suspend_credit_line`    | Admin                 |
 | `close_credit_line`      | Admin or borrower     |
 | `default_credit_line`    | Admin                 |
+| `settle_default_liquidation` | Admin             |
 | `reinstate_credit_line`  | Admin                 |
 | `set_liquidity_token`    | Admin                 |
 | `set_liquidity_source`   | Admin                 |
@@ -427,7 +443,9 @@ like actor/source/timestamp identifiers) while keeping v1 payloads stable. See
 ### Related Admin Workflows
 
 - Default lifecycle: `default_credit_line` → optional `suspend_credit_line` containment → `reinstate_credit_line` or `close_credit_line`.
+- Default liquidation lifecycle: `default_credit_line` emits `liq_req` → auction flow executes off-chain/on-chain as configured → admin applies proceeds via `settle_default_liquidation`.
 - Oracle-assisted default design: `docs/default-oracle.md`.
+- Auction hook architecture: `docs/default-liquidation-auction-hook.md`.
 
 ---
 

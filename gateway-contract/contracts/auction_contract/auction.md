@@ -26,6 +26,41 @@ The fuzz tests use fixed seeds and bounded iteration counts to keep CI runtime d
 
 ## Public Entry Points
 
+### Function: `settle_default_liquidation`
+
+Emits a deterministic settlement signal after an auction is closed so off-chain
+orchestrators can apply proceeds to the credit contract settlement hook.
+
+#### Interface
+
+```rust
+pub fn settle_default_liquidation(
+		env: Env,
+		auction_id: Symbol,
+		credit_contract: Address,
+		borrower: Address,
+)
+```
+
+#### Requirements
+
+- Auction identified by `auction_id` must be closed.
+- Settlement signal can be emitted only once per `auction_id`.
+
+#### Events Emitted
+
+- `("LIQ_SETL", "auction")` with payload:
+	- `auction_id`
+	- `credit_contract`
+	- `borrower`
+	- `winner`
+	- `recovered_amount`
+
+#### Notes
+
+- This method is signaling-only and does not perform token transfers.
+- Credit accounting update is performed by `settle_default_liquidation` on the credit contract.
+
 ### Function: `create_auction`
 
 Creates a new auction identified by `id`.

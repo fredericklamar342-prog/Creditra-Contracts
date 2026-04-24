@@ -1,7 +1,19 @@
 use crate::auth::{require_admin, require_admin_auth};
-use crate::events::{publish_credit_line_event, CreditLineEvent};
+use crate::events::{
+    publish_credit_line_event, publish_default_liquidation_requested_event,
+    publish_default_liquidation_settled_event, CreditLineEvent,
+    DefaultLiquidationRequestedEvent, DefaultLiquidationSettledEvent,
+};
 use crate::types::{CreditLineData, CreditStatus};
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
+
+fn liquidation_settlement_key(borrower: &Address, settlement_id: &Symbol) -> (Symbol, Address, Symbol) {
+    (
+        symbol_short!("liq_seen"),
+        borrower.clone(),
+        settlement_id.clone(),
+    )
+}
 
 /// Suspend a credit line temporarily.
 ///
@@ -135,6 +147,94 @@ pub fn default_credit_line(env: Env, borrower: Address) {
             credit_limit: credit_line.credit_limit,
             interest_rate_bps: credit_line.interest_rate_bps,
             risk_score: credit_line.risk_score,
+        },
+    );
+
+    publish_default_liquidation_requested_event(
+        &env,
+        DefaultLiquidationRequestedEvent {
+            borrower,
+            utilized_amount: credit_line.utilized_amount,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
+/// Apply auction liquidation proceeds to a defaulted credit line (admin only).
+///
+/// This hook is accounting-only and intentionally performs no token transfer.
+/// Off-chain orchestration is responsible for ensuring auction proceeds are settled
+/// into protocol custody before this function is called.
+pub fn settle_default_liquidation(
+    env: Env,
+    borrower: Address,
+    recovered_amount: i128,
+    settlement_id: Symbol,
+) {
+    require_admin_auth(&env);
+
+    if recovered_amount <= 0 {
+        panic!("recovered amount must be positive");
+    }
+
+    let settlement_key = liquidation_settlement_key(&borrower, &settlement_id);
+    if env.storage().persistent().has(&settlement_key) {
+        panic!("liquidation settlement already applied");
+    }
+
+    let mut credit_line: CreditLineData = env
+        .storage()
+        .persistent()
+        .get(&borrower)
+        .expect("Credit line not found");
+
+    // Apply interest accrual before any mutation
+    credit_line = crate::accrual::apply_accrual(&env, credit_line);
+
+    if credit_line.status != CreditStatus::Defaulted {
+        panic!("credit line is not defaulted");
+    }
+
+    if recovered_amount > credit_line.utilized_amount {
+        panic!("recovered amount exceeds utilized amount");
+    }
+
+    credit_line.utilized_amount = credit_line
+        .utilized_amount
+        .checked_sub(recovered_amount)
+        .expect("overflow while applying liquidation settlement");
+
+    if credit_line.utilized_amount == 0 {
+        credit_line.status = CreditStatus::Closed;
+    }
+
+    env.storage().persistent().set(&borrower, &credit_line);
+    env.storage().persistent().set(&settlement_key, &true);
+
+    if credit_line.status == CreditStatus::Closed {
+        publish_credit_line_event(
+            &env,
+            (symbol_short!("credit"), symbol_short!("closed")),
+            CreditLineEvent {
+                event_type: symbol_short!("closed"),
+                borrower: borrower.clone(),
+                status: CreditStatus::Closed,
+                credit_limit: credit_line.credit_limit,
+                interest_rate_bps: credit_line.interest_rate_bps,
+                risk_score: credit_line.risk_score,
+            },
+        );
+    }
+
+    publish_default_liquidation_settled_event(
+        &env,
+        DefaultLiquidationSettledEvent {
+            borrower,
+            settlement_id,
+            recovered_amount,
+            remaining_utilized_amount: credit_line.utilized_amount,
+            status: credit_line.status,
+            timestamp: env.ledger().timestamp(),
         },
     );
 }

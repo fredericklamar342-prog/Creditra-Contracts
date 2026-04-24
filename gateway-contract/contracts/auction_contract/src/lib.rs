@@ -4,7 +4,9 @@ mod events;
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Symbol};
 
-use events::publish_bid_refunded_event;
+use events::{
+    publish_bid_refunded_event, publish_default_liquidation_settlement_event,
+};
 
 #[contract]
 pub struct Auction;
@@ -20,6 +22,7 @@ pub struct AuctionState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuctionKey {
     Closed(Symbol),
+    LiquidationSettled(Symbol),
 }
 
 #[contractimpl]
@@ -78,6 +81,53 @@ impl Auction {
             amount,
         };
         env.storage().persistent().set(&auction_id, &new_state);
+    }
+
+    /// Emit an auction settlement signal for credit default liquidation orchestration.
+    ///
+    /// Requirements:
+    /// - auction must be closed
+    /// - settlement signal is one-time per auction_id
+    pub fn settle_default_liquidation(
+        env: Env,
+        auction_id: Symbol,
+        credit_contract: Address,
+        borrower: Address,
+    ) {
+        let is_closed = env
+            .storage()
+            .persistent()
+            .get(&AuctionKey::Closed(auction_id.clone()))
+            .unwrap_or(false);
+        if !is_closed {
+            panic!("auction is not closed");
+        }
+
+        let settlement_key = AuctionKey::LiquidationSettled(auction_id.clone());
+        let already_settled = env
+            .storage()
+            .persistent()
+            .get::<AuctionKey, bool>(&settlement_key)
+            .unwrap_or(false);
+        if already_settled {
+            panic!("liquidation already settled");
+        }
+
+        let state: AuctionState = env
+            .storage()
+            .persistent()
+            .get(&auction_id)
+            .unwrap_or_else(|| panic!("auction state not found"));
+
+        env.storage().persistent().set(&settlement_key, &true);
+        publish_default_liquidation_settlement_event(
+            &env,
+            auction_id,
+            credit_contract,
+            borrower,
+            state.bidder,
+            state.amount,
+        );
     }
 }
 

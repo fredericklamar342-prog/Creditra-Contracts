@@ -11,6 +11,7 @@ mod tests {
     use soroban_sdk::{Address, Env, Symbol, TryFromVal, TryIntoVal};
 
     const REFUND_TOPIC: &str = "BID_RFDN";
+    const SETTLEMENT_TOPIC: &str = "LIQ_SETL";
     const AUCTION_ID: &str = "inv_auc";
     const FUZZ_STEPS: usize = 64;
     const MAX_INCREMENT: u64 = 500;
@@ -39,6 +40,19 @@ mod tests {
             let t0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
             if t0 == Symbol::new(env, REFUND_TOPIC) {
                 let event_data: events::BidRefundedEvent = data.try_into_val(env).unwrap();
+                output.push(event_data);
+            }
+        }
+        output
+    }
+
+    fn settlement_events(env: &Env) -> Vec<events::DefaultLiquidationSettlementEvent> {
+        let mut output = Vec::new();
+        for (_contract, topics, data) in env.events().all().iter() {
+            let t0: Symbol = Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap();
+            if t0 == Symbol::new(env, SETTLEMENT_TOPIC) {
+                let event_data: events::DefaultLiquidationSettlementEvent =
+                    data.try_into_val(env).unwrap();
                 output.push(event_data);
             }
         }
@@ -258,5 +272,61 @@ mod tests {
             assert_eq!(stored_state, expected_state);
             assert_eq!(refunded_events(&env).len(), refunds_before_close);
         }
+    }
+
+    #[test]
+    fn settle_default_liquidation_requires_closed_auction() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+        let bidder = Address::generate(&env);
+        let auction_id = Symbol::new(&env, "liq_open");
+
+        client.place_bid(&auction_id, &bidder, &100_i128);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            client.settle_default_liquidation(
+                &auction_id,
+                &Address::generate(&env),
+                &Address::generate(&env),
+            );
+        }));
+
+        assert!(result.is_err(), "open auction should not settle");
+    }
+
+    #[test]
+    fn settle_default_liquidation_emits_once_after_close() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(Auction, ());
+        let client = AuctionClient::new(&env, &contract_id);
+
+        let bidder = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let credit_contract = Address::generate(&env);
+        let auction_id = Symbol::new(&env, "liq_closed");
+
+        client.place_bid(&auction_id, &bidder, &420_i128);
+        client.close_auction(&auction_id);
+        client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
+
+        let events = settlement_events(&env);
+        assert_eq!(events.len(), 1);
+        let evt = events.last().unwrap();
+        assert_eq!(evt.auction_id, auction_id);
+        assert_eq!(evt.credit_contract, credit_contract);
+        assert_eq!(evt.borrower, borrower);
+        assert_eq!(evt.winner, bidder);
+        assert_eq!(evt.recovered_amount, 420_i128);
+
+        let replay = catch_unwind(AssertUnwindSafe(|| {
+            client.settle_default_liquidation(&auction_id, &credit_contract, &borrower);
+        }));
+        assert!(replay.is_err(), "settlement replay should panic");
+        assert_eq!(settlement_events(&env).len(), 1);
     }
 }
