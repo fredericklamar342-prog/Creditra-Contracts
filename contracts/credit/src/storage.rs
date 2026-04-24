@@ -6,6 +6,8 @@ pub enum DataKey {
     LiquidityToken,
     LiquiditySource,
     MaxDrawAmount,
+    /// Persistent flag indicating a borrower is blocked from drawing credit.
+    BlockedBorrower(Address),
 }
 
 pub fn admin_key(env: &Env) -> Symbol {
@@ -54,11 +56,4 @@ pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
         .persistent()
         .get(&DataKey::BlockedBorrower(borrower.clone()))
         .unwrap_or(false)
-}
-
-/// Set or clear the blocked status for a borrower.
-pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::BlockedBorrower(borrower.clone()), &blocked);
 }

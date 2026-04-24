@@ -222,13 +222,13 @@ pub struct BorrowerBlockedEvent {
     pub blocked: bool,
 }
 
-/// Publish a borrower blocked/unblocked event.
-pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
-    let topic = if event.blocked {
-        symbol_short!("blocked")
-    } else {
-        Symbol::new(env, "unblocked")
-    };
+pub fn publish_admin_rotation_proposed(env: &Env, event: AdminRotationProposedEvent) {
     env.events()
-        .publish((symbol_short!("credit"), topic), event);
+        .publish((symbol_short!("credit"), symbol_short!("adm_prop")), event);
+}
+
+/// Publish an admin rotation accepted event.
+pub fn publish_admin_rotation_accepted(env: &Env, event: AdminRotationAcceptedEvent) {
+    env.events()
+        .publish((symbol_short!("credit"), symbol_short!("admin_acc")), event);
 }
