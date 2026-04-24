@@ -53,7 +53,8 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    DrawExceedsMaxAmount = 14, 
+    /// Draw amount exceeds the configured maximum draw cap.
+    DrawExceedsMaxAmount = 15,
 }
 
 /// Stored credit line data for a borrower.
@@ -118,4 +119,23 @@ pub struct RateFormulaConfig {
     pub min_rate_bps: u32,
     /// Maximum allowed computed rate (ceiling), must be <= 10_000.
     pub max_rate_bps: u32,
+}
+
+/// Compact summary of a credit line for UI/indexer queries.
+/// Reduces data transfer and indexer load by providing essential fields only.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditLineSummary {
+    /// Current status of the credit line.
+    pub status: CreditStatus,
+    /// Maximum borrowable amount for this line.
+    pub credit_limit: i128,
+    /// Current outstanding principal.
+    pub utilized_amount: i128,
+    /// Total accrued interest.
+    pub accrued_interest: i128,
+    /// Ledger timestamp of the last interest-rate update.
+    pub last_rate_update_ts: u64,
+    /// Ledger timestamp of the last interest accrual calculation.
+    pub last_accrual_ts: u64,
 }

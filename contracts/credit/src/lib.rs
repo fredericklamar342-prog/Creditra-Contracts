@@ -18,7 +18,6 @@ mod lifecycle;
 mod risk;
 mod storage;
 pub mod types;
-mod borrow;
 mod accrual;
 #[cfg(test)]
 mod accrual_tests;
@@ -32,7 +31,7 @@ use crate::events::{
     publish_repayment_event, CreditLineEvent, DrawnEvent, InterestAccruedEvent,
     RepaymentEvent,
 };
-use types::{ContractError, CreditLineData, CreditStatus, RateChangeConfig};
+use types::{ContractError, CreditLineData, CreditLineSummary, CreditStatus, RateChangeConfig};
 use auth::require_admin_auth;
 use storage::{clear_reentrancy_guard, set_reentrancy_guard, rate_cfg_key, DataKey};
 
@@ -383,16 +382,11 @@ impl Credit {
 
         // Apply interest accrual before any mutation
         credit_line = accrual::apply_accrual(&env, credit_line);
-
         // --- Status check: only Closed is disallowed ---
         if credit_line.status == CreditStatus::Closed {
             clear_reentrancy_guard(&env);
             env.panic_with_error(ContractError::CreditLineClosed);
         }
-
-        // --- Accrue pending interest before applying repayment ---
-        // This ensures interest cannot be skipped or evaded through frequent repayments.
-        apply_pending_accrual(&env, &borrower);
 
         // Reload credit line after potential accrual mutation
         credit_line = env
@@ -456,8 +450,9 @@ impl Credit {
         // --- Update state with "interest-first" policy ---
         // Repayment applies to interest first, then to principal.
         // utilized_amount includes both principal and accrued_interest.
-        let interest_to_pay = effective_repay.min(credit_line.accrued_interest);
-        credit_line.accrued_interest = credit_line.accrued_interest.checked_sub(interest_to_pay).unwrap_or(0);
+        let interest_repaid = effective_repay.min(credit_line.accrued_interest);
+        let principal_repaid = effective_repay.saturating_sub(interest_repaid);
+        credit_line.accrued_interest = credit_line.accrued_interest.checked_sub(interest_repaid).unwrap_or(0);
         
         let new_utilized = credit_line
             .utilized_amount
@@ -590,6 +585,31 @@ impl Credit {
     /// Get credit line data for a borrower (view function).
     pub fn get_credit_line(env: Env, borrower: Address) -> Option<CreditLineData> {
         env.storage().persistent().get(&borrower)
+    }
+
+    /// Get a compact summary of a credit line for UI/indexer queries.
+    ///
+    /// Returns essential fields (status, limits, utilization, timestamps) without
+    /// the full struct, reducing data transfer and indexer load.
+    ///
+    /// # Parameters
+    /// - `borrower`: Address of the borrower.
+    ///
+    /// # Returns
+    /// - `Some(CreditLineSummary)` if the credit line exists.
+    /// - `None` if the credit line does not exist.
+    pub fn get_credit_line_summary(env: Env, borrower: Address) -> Option<CreditLineSummary> {
+        env.storage()
+            .persistent()
+            .get::<Address, CreditLineData>(&borrower)
+            .map(|line| CreditLineSummary {
+                status: line.status,
+                credit_limit: line.credit_limit,
+                utilized_amount: line.utilized_amount,
+                accrued_interest: line.accrued_interest,
+                last_rate_update_ts: line.last_rate_update_ts,
+                last_accrual_ts: line.last_accrual_ts,
+            })
     }
 }
 
