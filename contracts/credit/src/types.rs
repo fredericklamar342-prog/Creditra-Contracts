@@ -53,7 +53,10 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    DrawExceedsMaxAmount = 14, 
+    /// Admin acceptance was attempted before the delay period elapsed.
+    AdminAcceptTooEarly = 15,
+    /// The requested draw amount exceeds the per-transaction limit.
+    DrawExceedsMaxAmount = 16, 
 }
 
 /// Stored credit line data for a borrower.
