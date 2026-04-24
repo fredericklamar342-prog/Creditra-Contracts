@@ -149,7 +149,6 @@ impl Credit {
             env.panic_with_error(ContractError::ScoreTooHigh);
         }
 
-        // Prevent overwriting an existing Active credit line
         if let Some(existing) = env
             .storage()
             .persistent()
@@ -172,7 +171,6 @@ impl Credit {
             accrued_interest: 0,
             last_accrual_ts: env.ledger().timestamp(),
         };
-
         env.storage().persistent().set(&borrower, &credit_line);
 
         publish_credit_line_event(
@@ -305,12 +303,12 @@ impl Credit {
                 clear_reentrancy_guard(&env);
                 panic!("Insufficient liquidity reserve for requested draw amount");
             }
-
             token_client.transfer(&reserve_address, &borrower, &amount);
         }
 
         credit_line.utilized_amount = updated_utilized;
         env.storage().persistent().set(&borrower, &credit_line);
+
         let timestamp = env.ledger().timestamp();
         publish_drawn_event(
             &env,
@@ -322,7 +320,6 @@ impl Credit {
             },
         );
         clear_reentrancy_guard(&env);
-        ()
     }
 
     pub fn repay_credit(env: Env, borrower: Address, amount: i128) {
@@ -563,6 +560,23 @@ impl Credit {
     /// Returns `true` when draws are globally frozen (view function).
     pub fn is_draws_frozen(env: Env) -> bool {
         freeze::is_draws_frozen(&env)
+    }
+
+    /// Returns all global protocol configuration in a single call.
+    ///
+    /// Useful for integrators who need to inspect the current state without
+    /// making multiple RPC calls. All fields are deterministic reads from
+    /// instance storage — no side effects.
+    ///
+    /// - `liquidity_token`: `None` until `set_liquidity_token` is called.
+    /// - `liquidity_source`: `None` until `init` is called (defaults to contract address).
+    /// - `rate_change_config`: `None` until `set_rate_change_limits` is called.
+    pub fn get_protocol_config(env: Env) -> ProtocolConfig {
+        ProtocolConfig {
+            liquidity_token: env.storage().instance().get(&DataKey::LiquidityToken),
+            liquidity_source: env.storage().instance().get(&DataKey::LiquiditySource),
+            rate_change_config: env.storage().instance().get(&rate_cfg_key(&env)),
+        }
     }
 }
 
@@ -2178,7 +2192,6 @@ mod test_mock_liquidity_token {
         let contract_id = env.register(Credit, ());
         let _token_id = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let client = CreditClient::new(&env, &contract_id);
-
         client.init(&admin);
         client.open_credit_line(&borrower, &1_000_i128, &300_u32, &70_u32);
 
@@ -2217,7 +2230,6 @@ mod test_mock_liquidity_token {
     fn test_draw_credit_overflow_panics() {
         let env = Env::default();
         env.mock_all_auths();
-
         let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
@@ -2295,7 +2307,6 @@ mod test_mock_liquidity_token {
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
-
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.close_credit_line(&borrower, &admin);
@@ -2318,7 +2329,6 @@ mod test_mock_liquidity_token {
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
-
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
@@ -2341,7 +2351,6 @@ mod test_mock_liquidity_token {
         let borrower = Address::generate(&env);
         let contract_id = env.register(Credit, ());
         let client = CreditClient::new(&env, &contract_id);
-
         client.init(&admin);
         client.open_credit_line(&borrower, &1000_i128, &300_u32, &70_u32);
         client.default_credit_line(&borrower);
@@ -2424,6 +2433,7 @@ mod test_rate_change_limits {
     fn test_rate_change_within_limit_succeeds() {
         let env = Env::default();
         env.mock_all_auths();
+        let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
         let (client, _admin) = setup(&env, &borrower, 5_000, 0);
 
@@ -2954,6 +2964,7 @@ mod test_max_draw_amount {
     fn draw_cap_unset_no_limit() {
         let env = Env::default();
         env.mock_all_auths();
+        let admin = Address::generate(&env);
         let borrower = Address::generate(&env);
         let (client, _admin) = setup_with_reserve(&env, &borrower, 1_000, 1_000);
 
