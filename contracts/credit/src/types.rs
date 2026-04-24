@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, coverage(off))]
 
-//! Core data types for the Credit contract.
+//! Core data types for the Creditra contract.
 
 use soroban_sdk::{contracttype, Address};
 
@@ -53,12 +55,19 @@ pub enum ContractError {
     LimitDecreaseRequiresRepayment = 13,
     /// Contract has already been initialized; `init` may only be called once.
     AlreadyInitialized = 14,
-    /// Draw amount exceeds the configured maximum draw cap.
-    DrawExceedsMaxAmount = 15,
+    /// All draws are globally frozen by admin for liquidity reserve operations.
+    DrawsFrozen = 15,
+    /// The requested draw exceeds the configured per-transaction maximum.
+    DrawExceedsMaxAmount = 16,
+    /// Borrower is blocked from drawing credit.
+    BorrowerBlocked = 17,
+    /// Admin acceptance attempted before the delay window has elapsed.
+    AdminAcceptTooEarly = 18,
 }
 
 /// Stored credit line data for a borrower.
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreditLineData {
     /// Address of the borrower.
     pub borrower: Address,
@@ -92,6 +101,7 @@ pub struct RateChangeConfig {
     /// Minimum elapsed seconds between two consecutive rate changes.
     pub rate_change_min_interval: u64,
 }
+}
 
 /// Admin-configurable piecewise-linear rate formula.
 ///
@@ -121,21 +131,14 @@ pub struct RateFormulaConfig {
     pub max_rate_bps: u32,
 }
 
-/// Compact summary of a credit line for UI/indexer queries.
-/// Reduces data transfer and indexer load by providing essential fields only.
+/// Structured representation of the contract's API version (semver).
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreditLineSummary {
-    /// Current status of the credit line.
-    pub status: CreditStatus,
-    /// Maximum borrowable amount for this line.
-    pub credit_limit: i128,
-    /// Current outstanding principal.
-    pub utilized_amount: i128,
-    /// Total accrued interest.
-    pub accrued_interest: i128,
-    /// Ledger timestamp of the last interest-rate update.
-    pub last_rate_update_ts: u64,
-    /// Ledger timestamp of the last interest accrual calculation.
-    pub last_accrual_ts: u64,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContractVersion {
+    /// Incremented on breaking ABI or storage layout changes.
+    pub major: u32,
+    /// Incremented on backward-compatible feature additions.
+    pub minor: u32,
+    /// Incremented on backward-compatible bug fixes.
+    pub patch: u32,
 }
