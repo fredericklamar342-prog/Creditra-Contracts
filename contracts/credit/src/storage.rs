@@ -62,6 +62,7 @@ pub fn is_borrower_blocked(env: &Env, borrower: &Address) -> bool {
 }
 
 /// Set or clear the blocked status for a borrower.
+#[allow(dead_code)]
 pub fn set_borrower_blocked(env: &Env, borrower: &Address, blocked: bool) {
     env.storage()
         .persistent()

@@ -41,6 +41,7 @@ use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env};
 // constants removed - imported from risk module
 
 /// Seconds in a standard year (365 days).
+#[allow(dead_code)]
 const SECONDS_PER_YEAR: u64 = 31_536_000;
 
 #[contract]
@@ -654,6 +655,7 @@ mod test {
         token::Client::new(env, token).approve(from, spender, &amount, &1_000_u32);
     }
 
+    #[allow(dead_code)]
     fn setup_contract_with_credit_line<'a>(
         env: &'a Env,
         borrower: &Address,

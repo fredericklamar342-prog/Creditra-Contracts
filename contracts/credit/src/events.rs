@@ -245,6 +245,7 @@ pub struct BorrowerBlockedEvent {
 }
 
 /// Publish a borrower blocked/unblocked event.
+#[allow(dead_code)]
 pub fn publish_borrower_blocked_event(env: &Env, event: BorrowerBlockedEvent) {
     let topic = if event.blocked {
         symbol_short!("blocked")
@@ -264,6 +265,7 @@ pub struct RateFormulaConfigEvent {
 }
 
 /// Publish a rate formula config change event.
+#[allow(dead_code)]
 pub fn publish_rate_formula_config_event(env: &Env, event: RateFormulaConfigEvent) {
     env.events().publish(
         (symbol_short!("credit"), Symbol::new(env, "rate_form")),
